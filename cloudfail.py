@@ -19,9 +19,7 @@ import dns.resolver
 import collections
 collections.Callable = collections.abc.Callable
 
-
 colorama.init(Style.BRIGHT)
-
 
 def print_out(data, end='\n'):
     datetimestr = str(datetime.datetime.strftime(datetime.datetime.now(), '%H:%M:%S'))
@@ -80,36 +78,65 @@ def subnetwork_to_ip_range(subnetwork):
 
     raise ValueError("invalid subnetwork")
 
-
 def dnsdumpster(target):
-    print_out(Fore.CYAN + "Testing for misconfigured DNS using dnsdumpster...")
+    print_out(Fore.CYAN + "Testing for misconfigured DNS using DNSDumpster API…")
 
-    res = DNSDumpsterAPI(False).search(target)
+    api = DNSDumpsterAPI(api_key=args.api_key, verbose=False)
+    try:
+        # page=None, include_map=False for free tier; set True if you want the base64‐map
+        res = api.search(target, page=None, include_map=False)
+    except Exception as e:
+        print_out(Fore.RED + f"DNSDumpster API error: {e}")
+        return
 
-    if res['dns_records']['host']:
-        for entry in res['dns_records']['host']:
-            provider = str(entry['provider'])
-            if "Cloudflare" not in provider:
-                print_out(
-                    Style.BRIGHT + Fore.WHITE + "[FOUND:HOST] " + Fore.GREEN + "{domain} {ip} {as} {provider} {country}".format(
-                        **entry))
+    # A records
+    for entry in res.get('a', []):
+        host = entry.get('host')
+        for ipinfo in entry.get('ips', []):
+            ip       = ipinfo.get('ip')
+            asn      = ipinfo.get('asn')
+            provider = ipinfo.get('asn_name')
+            country  = ipinfo.get('country')
+            print_out(Style.BRIGHT + Fore.WHITE +
+                      f"[FOUND:A]      {host} → {ip}   {asn}   {provider}   {country}")
 
-    if res['dns_records']['dns']:
-        for entry in res['dns_records']['dns']:
-            provider = str(entry['provider'])
-            if "Cloudflare" not in provider:
-                print_out(
-                    Style.BRIGHT + Fore.WHITE + "[FOUND:DNS] " + Fore.GREEN + "{domain} {ip} {as} {provider} {country}".format(
-                        **entry))
+    # NS records
+    for entry in res.get('ns', []):
+        host = entry.get('host')
+        for ipinfo in entry.get('ips', []):
+            ip       = ipinfo.get('ip')
+            asn      = ipinfo.get('asn')
+            provider = ipinfo.get('asn_name')
+            country  = ipinfo.get('country')
+            print_out(Style.BRIGHT + Fore.WHITE +
+                      f"[FOUND:NS]     {host} → {ip}   {asn}   {provider}   {country}")
 
-    if res['dns_records']['mx']:
-        for entry in res['dns_records']['mx']:
-            provider = str(entry['provider'])
-            if "Cloudflare" not in provider:
-                print_out(
-                    Style.BRIGHT + Fore.WHITE + "[FOUND:MX] " + Fore.GREEN + "{ip} {as} {provider} {domain}".format(
-                        **entry))
+    # MX records
+    for entry in res.get('mx', []):
+        host = entry.get('host')
+        for ipinfo in entry.get('ips', []):
+            ip       = ipinfo.get('ip')
+            asn      = ipinfo.get('asn')
+            provider = ipinfo.get('asn_name')
+            country  = ipinfo.get('country')
+            print_out(Style.BRIGHT + Fore.WHITE +
+                      f"[FOUND:MX]     {host} → {ip}   {asn}   {provider}   {country}")
 
+    # CNAME records
+    for entry in res.get('cname', []):
+        host = entry.get('host')
+        for ipinfo in entry.get('ips', []):
+            ip       = ipinfo.get('ip')
+            asn      = ipinfo.get('asn')
+            provider = ipinfo.get('asn_name')
+            country  = ipinfo.get('country')
+            print_out(Style.BRIGHT + Fore.WHITE +
+                      f"[FOUND:CNAME]  {host} → {ip}   {asn}   {provider}   {country}")
+
+    # TXT records
+    for txt in res.get('txt', []):
+        print_out(Style.BRIGHT + Fore.WHITE +
+                  f"[FOUND:TXT]    {txt}")
 
 def crimeflare(target):
     print_out(Fore.CYAN + "Scanning crimeflare database...")
@@ -277,6 +304,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-t", "--target", help="target url of website", type=str)
 parser.add_argument("-T", "--tor", dest="tor", action="store_true", help="enable TOR routing")
 parser.add_argument("-u", "--update", dest="update", action="store_true", help="update databases")
+parser.add_argument("-k","--api-key", help="DNSDumpster API key", type=str, required=True)
 parser.add_argument("-s", "--subdomains", help="name of alternate subdomains list stored in the data directory", type=str)
 parser.set_defaults(tor=False)
 parser.set_defaults(update=False)
@@ -302,16 +330,12 @@ if args.update is True:
     update()
 
 try:
-
     # Initialize CloudFail
     init(args.target)
-
     # Scan DNSdumpster.com
     dnsdumpster(args.target)
-
     # Scan Crimeflare database
     crimeflare(args.target)
-
     # Scan subdomains with or without TOR
     subdomain_scan(args.target, args.subdomains)
 
