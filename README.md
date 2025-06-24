@@ -7,8 +7,7 @@
 5. Built-in rate-limit handling
 
 ## Requirements
-`pip uninstall urllib3`
-`pip install urllib3`
+`pip uninstall urllib3 && pip install urllib3`
 
 ---------------------------------------------------------------------------------------------------------------------------------------------------
 
