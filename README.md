@@ -5,6 +5,7 @@
 4. Simplified the JSON-driven output
 4.1 Instead of walking four <table>s, we just iterate over the JSON arrays (a, ns, mx, cname, txt) and print them in the same “[FOUND:…]” style.
 5. Built-in rate-limit handling
+6. Added --subdomains param for custom lists support
 
 ## Requirements
 `pip uninstall urllib3 && pip install urllib3`
