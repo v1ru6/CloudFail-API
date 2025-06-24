@@ -1,3 +1,13 @@
+# Changes to original - dnsdumpster array out of range
+1. Swapped out HTML-scraping for the official REST API
+2. Added a required --api-key flag
+3. Removed cloudscraper/BS4/_session-cookie juggling
+4. Simplified the JSON-driven output
+4.1 Instead of walking four <table>s, we just iterate over the JSON arrays (a, ns, mx, cname, txt) and print them in the same “[FOUND:…]” style.
+5. Built-in rate-limit handling
+
+---------------------------------------------------------------------------------------------------------------------------------------------------
+
 # CloudFail
 
 CloudFail is a tactical reconnaissance tool which aims to gather enough information about a target protected by Cloudflare in the hopes of discovering the location of the server. Using Tor to mask all requests, the tool as of right now has 3 different attack phases.
