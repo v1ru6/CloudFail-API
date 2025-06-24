@@ -9,6 +9,10 @@
 ## Requirements
 `pip uninstall urllib3 && pip install urllib3`
 
+## Usage
+`python3 cloudfail.py --target example.com --api-key [key]`
+Register to dnsdumpster.com to obtain your API key.
+
 ---------------------------------------------------------------------------------------------------------------------------------------------------
 
 # CloudFail
