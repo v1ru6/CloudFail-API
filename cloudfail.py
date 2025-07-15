@@ -71,15 +71,21 @@ def ip_in_subnetwork(ip, subnet):
 def dnsdumpster(target):
     print_out(Fore.CYAN + "Testing DNS via DNSDumpster API…")
     api = DNSDumpsterAPI(api_key=args.api_key, verbose=False)
+    dnsdumpster_domains = set()
+    
     try:
         res = api.search(target, page=None, include_map=False)
     except Exception as e:
         print_out(Fore.RED + f"DNSDumpster error: {e}")
-        return
+        return dnsdumpster_domains
 
+    # Process and display DNSDumpster results
     for rtype in ("a", "ns", "mx", "cname"):
         for entry in res.get(rtype, []):
             host = entry.get("host", "")
+            if host:
+                dnsdumpster_domains.add(host)
+                
             for ipinfo in entry.get("ips", []):
                 ip = ipinfo.get("ip", "")
                 asn = ipinfo.get("asn", "")
@@ -93,6 +99,9 @@ def dnsdumpster(target):
 
     for txt in res.get("txt", []):
         print_out(Style.BRIGHT + Fore.WHITE + f"[FOUND:TXT   ] {txt}")
+    
+    print_out(Fore.CYAN + f"DNSDumpster found {len(dnsdumpster_domains)} unique domains")
+    return dnsdumpster_domains
 
 
 def crimeflare(target):
@@ -166,12 +175,57 @@ def check_for_wildcard(target):
         return False
 
 
-def subdomain_scan(target, wordlist_file, force=False):
+def resolve_subdomain(subdomain):
+    """Resolve a subdomain and return IP if successful, None otherwise"""
+    try:
+        ip = socket.gethostbyname(subdomain)
+        return ip
+    except socket.gaierror:
+        return None
+
+
+def check_subdomain(subdomain, target):
+    """Check a single subdomain and return result if resolved successfully"""
+    # DNS resolution
+    ip = resolve_subdomain(subdomain)
+    if ip is None:
+        return None  # Skip unresolved subdomains
+    
+    # check Cloudflare
+    try:
+        is_cf = inCloudFlare(ip)
+    except ValueError:
+        is_cf = False
+
+    # HTTP probe
+    try:
+        r = requests.get("http://" + subdomain, timeout=5)
+        status = r.status_code
+    except Exception:
+        status = "ERR"
+
+    color = Fore.RED if is_cf else Fore.GREEN
+    tag = "CLOUDFLARE" if is_cf else "OPEN"
+
+    result = {
+        'subdomain': subdomain,
+        'ip': ip,
+        'status': status,
+        'is_cf': is_cf,
+        'tag': tag,
+        'color': color
+    }
+    
+    return result
+
+
+def subdomain_scan(target, wordlist_file, dnsdumpster_domains, force=False):
     # If wildcard DNS is present, respect --force
     if not force and check_for_wildcard(target):
         print_out(Fore.CYAN + "Wildcard DNS detected — aborting scan (use -F to force)")
         return
 
+    # Load wordlist
     try:
         with open(wordlist_file, "r") as f:
             labels = [l.strip() for l in f if l.strip()]
@@ -179,52 +233,51 @@ def subdomain_scan(target, wordlist_file, force=False):
         print_out(Fore.RED + f"Cannot open subdomains file '{wordlist_file}' — aborting")
         sys.exit(1)
 
-    total = len(labels)
-    print_out(Fore.CYAN + f"Scanning {total} subdomains from {wordlist_file}…")
+    # Create full subdomain list from wordlist
+    wordlist_subdomains = set()
+    for label in labels:
+        if label.lower().endswith(target.lower()):
+            wordlist_subdomains.add(label)
+        else:
+            wordlist_subdomains.add(f"{label}.{target}")
 
-    for idx, label in enumerate(labels, start=1):
+    # Combine wordlist subdomains with DNSDumpster results
+    all_subdomains = wordlist_subdomains.union(dnsdumpster_domains)
+    
+    # Filter out duplicates and sort
+    all_subdomains = sorted(list(all_subdomains))
+    
+    total = len(all_subdomains)
+    resolved_count = 0
+    skipped_count = 0
+    
+    print_out(Fore.CYAN + f"Scanning {total} subdomains ({len(wordlist_subdomains)} from wordlist + {len(dnsdumpster_domains)} from DNSDumpster)…")
+
+    for idx, subdomain in enumerate(all_subdomains, start=1):
         if total and idx % max(1, total // 100) == 0:
             pct = round(idx / total * 100, 1)
-            print_out(Fore.CYAN + f"{pct}% complete", end='\r')
+            print_out(Fore.CYAN + f"{pct}% complete ({resolved_count} resolved, {skipped_count} skipped)", end='\r')
 
-        # don't append target if label already ends with it
-        if label.lower().endswith(target.lower()):
-            sub = label
-        else:
-            sub = f"{label}.{target}"
-
-        # DNS resolution
-        try:
-            ip = socket.gethostbyname(sub)
-        except socket.gaierror:
-            print_out(Fore.YELLOW + f"[SKIP:RESOLVE] {sub:30} could not resolve")
+        result = check_subdomain(subdomain, target)
+        
+        if result is None:
+            skipped_count += 1
+            # Don't print [SKIP:RESOLVE] messages
             continue
-
-        # check Cloudflare
-        try:
-            is_cf = inCloudFlare(ip)
-        except ValueError:
-            is_cf = False
-
-        # HTTP probe
-        try:
-            r = requests.get("http://" + sub, timeout=5)
-            status = r.status_code
-        except Exception:
-            status = "ERR"
-
-        color = Fore.RED if is_cf else Fore.GREEN
-        tag = "CLOUDFLARE" if is_cf else "OPEN"
-
+        
+        resolved_count += 1
+        
+        # Print the result
+        source_tag = "[DNS]" if subdomain in dnsdumpster_domains else "[WRD]"
         print_out(
             Style.BRIGHT
             + Fore.WHITE
-            + f"[FOUND:SUB] {sub:30} IP: {ip:15} HTTP: {status} "
-            + color
-            + tag
+            + f"[FOUND:SUB] {source_tag} {result['subdomain']:30} IP: {result['ip']:15} HTTP: {result['status']} "
+            + result['color']
+            + result['tag']
         )
 
-    print_out(Fore.CYAN + "Subdomain scan complete.")
+    print_out(Fore.CYAN + f"Subdomain scan complete. Found {resolved_count} resolved domains, skipped {skipped_count} unresolved.")
 
 
 def update():
@@ -252,7 +305,7 @@ logo = r"""
     v1.0.6                      by v1ru6
 """
 print(Fore.RED + Style.BRIGHT + logo + Fore.RESET)
-print_out("Initializing CloudFail — " + datetime.datetime.now().strftime("%d/%m/%Y"))
+print_out("Initializing Enhanced CloudFail — " + datetime.datetime.now().strftime("%d/%m/%Y"))
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-t", "--target", help="target URL", type=str, required=True)
@@ -290,8 +343,8 @@ if args.update:
 
 try:
     init(args.target)
-    dnsdumpster(args.target)
+    dnsdumpster_domains = dnsdumpster(args.target)
     crimeflare(args.target)
-    subdomain_scan(args.target, args.subdomains, force=args.force)
+    subdomain_scan(args.target, args.subdomains, dnsdumpster_domains, force=args.force)
 except KeyboardInterrupt:
     sys.exit(0)
